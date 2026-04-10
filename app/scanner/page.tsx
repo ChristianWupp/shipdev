@@ -1,8 +1,42 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import type { ProtocolReport } from "@/lib/scanner/types";
 import { ScannerReport } from "./scanner-report";
+
+const threats = [
+  "What happens if the keys leak?",
+  "What happens if the team gets social engineered?",
+  "What happens if a signer's laptop is compromised?",
+  "What happens if the team hires a North Korean developer?",
+  "What happens if the multisig gets phished?",
+  "What happens if the admin key is a single EOA?",
+];
+
+function RotatingThreat() {
+  const [index, setIndex] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setIndex((i) => (i + 1) % threats.length);
+        setVisible(true);
+      }, 400);
+    }, 3500);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <h1
+      className="font-serif text-[36px] font-normal leading-tight mb-3 min-h-[90px] flex items-start transition-opacity duration-[400ms] ease-out"
+      style={{ opacity: visible ? 1 : 0 }}
+    >
+      {threats[index]}
+    </h1>
+  );
+}
 
 interface ProtocolSummary {
   id: string;
@@ -71,9 +105,7 @@ export default function ScannerPage() {
           <div className="text-[10px] uppercase tracking-[2px] text-accent font-semibold mb-2">
             Protocol Security
           </div>
-          <h1 className="font-serif text-[36px] font-normal leading-tight mb-3">
-            What happens if the keys leak?
-          </h1>
+          <RotatingThreat />
           <p className="text-[15px] text-text-secondary max-w-[600px] leading-[1.6]">
             Pick a protocol. We scan every contract, trace who controls what, and
             show you exactly what a compromised key can do to your money.
