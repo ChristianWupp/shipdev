@@ -1,33 +1,33 @@
 "use client";
 
-import { useState } from "react";
-import type { SecurityReport } from "@/lib/scanner/types";
+import { useState, useEffect } from "react";
+import type { ProtocolReport } from "@/lib/scanner/types";
 import { ScannerReport } from "./scanner-report";
 
-const CHAINS = [
-  { id: "ethereum", label: "Ethereum" },
-  { id: "arbitrum", label: "Arbitrum" },
-  { id: "base", label: "Base" },
-  { id: "optimism", label: "Optimism" },
-];
-
-const EXAMPLES = [
-  { label: "USDC Proxy", address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48" },
-  { label: "Uniswap V3 Router", address: "0xE592427A0AEce92De3Edee1F18E0157C05861564" },
-  { label: "Aave V3 Pool", address: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2" },
-];
+interface ProtocolSummary {
+  id: string;
+  name: string;
+  chain: string;
+  tvl?: string;
+  description: string;
+}
 
 export default function ScannerPage() {
-  const [address, setAddress] = useState("");
-  const [chain, setChain] = useState("ethereum");
-  const [report, setReport] = useState<SecurityReport | null>(null);
+  const [protocols, setProtocols] = useState<ProtocolSummary[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [report, setReport] = useState<ProtocolReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function scan(targetAddress?: string) {
-    const addr = targetAddress ?? address;
-    if (!addr.trim()) return;
+  useEffect(() => {
+    fetch("/api/scanner")
+      .then((r) => r.json())
+      .then((data) => setProtocols(data))
+      .catch(() => {});
+  }, []);
 
+  async function scan(protocolId: string) {
+    setSelectedId(protocolId);
     setLoading(true);
     setError(null);
     setReport(null);
@@ -36,13 +36,13 @@ export default function ScannerPage() {
       const res = await fetch("/api/scanner", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ address: addr.trim(), chain }),
+        body: JSON.stringify({ protocolId }),
       });
       const data = await res.json();
       if (!res.ok) {
         setError(data.error ?? "Scan failed");
       } else {
-        setReport(data as SecurityReport);
+        setReport(data as ProtocolReport);
       }
     } catch {
       setError("Network error — could not reach scanner API");
@@ -60,72 +60,59 @@ export default function ScannerPage() {
         </a>
         <div className="flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-[1px] text-accent font-semibold">
-            Scanner
+            Protocol Scanner
           </span>
         </div>
       </nav>
 
-      <main className="flex-1 max-w-[760px] mx-auto w-full px-8 py-12">
+      <main className="flex-1 max-w-[840px] mx-auto w-full px-8 py-12">
         {/* Header */}
         <div className="mb-10">
           <div className="text-[10px] uppercase tracking-[2px] text-accent font-semibold mb-2">
             Protocol Security
           </div>
           <h1 className="font-serif text-[36px] font-normal leading-tight mb-3">
-            Security posture scanner
+            What happens if the keys leak?
           </h1>
-          <p className="text-[15px] text-text-secondary max-w-[540px] leading-[1.6]">
-            Paste a contract address. Get a full security report: multi-sig status,
-            privileged roles, proxy patterns, upgradeability, kill switches, and
-            SEAL org compliance.
+          <p className="text-[15px] text-text-secondary max-w-[600px] leading-[1.6]">
+            Pick a protocol. We scan every contract, trace who controls what, and
+            show you exactly what a compromised key can do to your money.
+            The same threat model North Korea is running.
           </p>
         </div>
 
-        {/* Input */}
-        <div className="bg-surface border border-border rounded-[12px] p-5 mb-6">
-          <div className="flex gap-3 mb-3">
-            <input
-              type="text"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && scan()}
-              placeholder="0x..."
-              className="flex-1 bg-surface-elevated border border-border rounded-[6px] px-4 py-[10px] text-[13px] font-mono text-text-primary placeholder:text-text-muted outline-none focus:border-accent/40 transition-colors"
-            />
-            <select
-              value={chain}
-              onChange={(e) => setChain(e.target.value)}
-              className="bg-surface-elevated border border-border rounded-[6px] px-3 py-[10px] text-[12px] text-text-secondary outline-none focus:border-accent/40 transition-colors cursor-pointer"
-            >
-              {CHAINS.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.label}
-                </option>
-              ))}
-            </select>
+        {/* Protocol selector */}
+        <div className="mb-8">
+          <div className="text-[10px] uppercase tracking-[1px] text-text-muted font-semibold mb-3">
+            Select a protocol to analyze
           </div>
-          <div className="flex items-center justify-between">
-            <div className="flex gap-2">
-              {EXAMPLES.map((ex) => (
-                <button
-                  key={ex.address}
-                  onClick={() => {
-                    setAddress(ex.address);
-                    scan(ex.address);
-                  }}
-                  className="text-[10px] text-text-muted hover:text-accent border border-border rounded-full px-3 py-[4px] transition-colors cursor-pointer"
-                >
-                  {ex.label}
-                </button>
-              ))}
-            </div>
-            <button
-              onClick={() => scan()}
-              disabled={loading || !address.trim()}
-              className="bg-accent text-black rounded-[6px] px-6 py-[10px] text-[13px] font-semibold cursor-pointer hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {loading ? "Scanning..." : "Scan"}
-            </button>
+          <div className="grid grid-cols-2 gap-3">
+            {protocols.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => scan(p.id)}
+                disabled={loading}
+                className={`text-left bg-surface border rounded-[8px] p-4 cursor-pointer transition-colors disabled:opacity-60 ${
+                  selectedId === p.id
+                    ? "border-accent/40"
+                    : "border-border hover:border-[#2a2a2a]"
+                }`}
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[14px] text-text-primary font-semibold">
+                    {p.name}
+                  </span>
+                  {p.tvl && (
+                    <span className="font-mono text-[11px] text-text-muted">
+                      {p.tvl}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-text-muted leading-[1.4] line-clamp-2">
+                  {p.description}
+                </p>
+              </button>
+            ))}
           </div>
         </div>
 
@@ -134,7 +121,10 @@ export default function ScannerPage() {
           <div className="flex flex-col items-center py-16 gap-4">
             <div className="w-8 h-8 border-2 border-border border-t-accent rounded-full animate-spin" />
             <div className="text-[12px] text-text-muted">
-              Analyzing on-chain data...
+              Scanning all contracts on-chain...
+            </div>
+            <div className="text-[10px] text-text-muted">
+              Reading bytecode, proxy slots, and admin addresses
             </div>
           </div>
         )}
@@ -148,24 +138,12 @@ export default function ScannerPage() {
 
         {/* Report */}
         {report && !loading && <ScannerReport report={report} />}
-
-        {/* Empty state */}
-        {!report && !loading && !error && (
-          <div className="text-center py-20">
-            <div className="text-[13px] text-text-muted mb-2">
-              Enter a contract address to begin
-            </div>
-            <div className="text-[11px] text-text-muted">
-              Supports Ethereum, Arbitrum, Base, and Optimism
-            </div>
-          </div>
-        )}
       </main>
 
       {/* Footer */}
       <footer className="border-t border-border py-8 text-center">
         <div className="text-[11px] text-text-muted">
-          ShipDev Scanner — On-chain security analysis via bytecode + storage slot inspection
+          ShipDev Scanner — Protocol-level threat modeling via bytecode + storage slot analysis
         </div>
       </footer>
     </div>

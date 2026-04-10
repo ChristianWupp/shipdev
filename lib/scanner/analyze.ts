@@ -1,512 +1,308 @@
-import { JsonRpcProvider, getAddress, isAddress } from "ethers";
+import { JsonRpcProvider, getAddress } from "ethers";
 import type {
-  SecurityReport,
-  CheckResult,
-  CheckStatus,
+  ProtocolDefinition,
+  ProtocolReport,
+  ContractScanResult,
+  AttackScenario,
+  ContractRole,
+  ImpactCategory,
   Severity,
 } from "./types";
 
-// Well-known storage slots (EIP-1967)
+// EIP-1967 storage slots
 const IMPLEMENTATION_SLOT =
   "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
 const ADMIN_SLOT =
   "0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103";
-const BEACON_SLOT =
-  "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50";
 
-// Known multi-sig bytecode signatures (Gnosis Safe)
-const SAFE_SELECTORS = [
-  "0x6a761202", // execTransaction
-  "0xe009cfde", // removeOwner
-  "0x0d582f13", // addOwnerWithThreshold
-];
+// Function selectors
+const PAUSE_SELECTORS = ["8456cb59", "3f4ba83a", "5c975abb"];
+const OWNERSHIP_SELECTORS = ["f2fde38b", "715018a6"];
+const ACCESS_CONTROL_SELECTORS = ["2f2ff15d", "d547741f", "91d14854"];
+const TIMELOCK_SELECTORS = ["0e18b681", "61461954", "d45c4435"];
 
-// Kill switch / pause selectors
-const PAUSE_SELECTORS = [
-  "0x8456cb59", // pause()
-  "0x3f4ba83a", // unpause()
-  "0x5c975abb", // paused()
-];
-
-// Privileged role selectors
-const ROLE_SELECTORS = [
-  "0xf2fde38b", // transferOwnership(address)
-  "0x715018a6", // renounceOwnership()
-  "0x2f2ff15d", // grantRole(bytes32,address)
-  "0xd547741f", // revokeRole(bytes32,address)
-  "0x91d14854", // hasRole(bytes32,address)
-  "0x248a9ca3", // getRoleAdmin(bytes32)
-];
-
-// Known audit org addresses (SEAL, OpenZeppelin, etc.) — placeholder for real registry
-const SEAL_REGISTRY: string[] = [];
-
-function check(
-  id: string,
-  label: string,
-  status: CheckStatus,
-  severity: Severity,
-  detail: string
-): CheckResult {
-  return { id, label, status, severity, detail };
-}
-
-function bytecodeHasSelector(bytecode: string, selector: string): boolean {
-  // Strip 0x, selectors are pushed as 4-byte values in bytecode
-  return bytecode.includes(selector.slice(2));
-}
-
-function bytecodeHasAnySelector(
-  bytecode: string,
-  selectors: string[]
-): string[] {
-  return selectors.filter((s) => bytecodeHasSelector(bytecode, s));
-}
-
-export async function analyzeContract(
-  address: string,
-  chainRpcUrl: string
-): Promise<SecurityReport> {
-  if (!isAddress(address)) {
-    throw new Error("Invalid Ethereum address");
-  }
-
-  const normalizedAddress = getAddress(address);
-  const provider = new JsonRpcProvider(chainRpcUrl);
-
-  // Fetch bytecode
-  const bytecode = await provider.getCode(normalizedAddress);
-  const isContract = bytecode !== "0x" && bytecode.length > 2;
-
-  if (!isContract) {
-    return eoaReport(normalizedAddress);
-  }
-
-  // Parallel on-chain reads
-  const [implSlotRaw, adminSlotRaw, beaconSlotRaw] = await Promise.all([
-    provider.getStorage(normalizedAddress, IMPLEMENTATION_SLOT),
-    provider.getStorage(normalizedAddress, ADMIN_SLOT),
-    provider.getStorage(normalizedAddress, BEACON_SLOT),
-  ]);
-
-  const implAddress = slotToAddress(implSlotRaw);
-  const adminAddress = slotToAddress(adminSlotRaw);
-  const beaconAddress = slotToAddress(beaconSlotRaw);
-
-  const isProxy = implAddress !== null || beaconAddress !== null;
-
-  // If proxy, fetch implementation bytecode for deeper analysis
-  let implBytecode = bytecode;
-  if (implAddress) {
-    implBytecode = await provider.getCode(implAddress);
-  }
-
-  // Analyze bytecode for function selectors
-  const hasSafeSelectors = bytecodeHasAnySelector(bytecode, SAFE_SELECTORS);
-  const hasPauseSelectors = bytecodeHasAnySelector(
-    implBytecode,
-    PAUSE_SELECTORS
-  );
-  const hasRoleSelectors = bytecodeHasAnySelector(
-    implBytecode,
-    ROLE_SELECTORS
-  );
-
-  // Check if admin is a contract (likely multi-sig)
-  let adminIsContract = false;
-  if (adminAddress) {
-    const adminCode = await provider.getCode(adminAddress);
-    adminIsContract = adminCode !== "0x" && adminCode.length > 2;
-  }
-
-  // Build checks
-  const multisig = analyzeMultisig(
-    hasSafeSelectors,
-    adminAddress,
-    adminIsContract
-  );
-  const privilegedRoles = analyzeRoles(hasRoleSelectors, implBytecode);
-  const proxy = analyzeProxy(isProxy, implAddress, beaconAddress);
-  const upgradeability = analyzeUpgradeability(
-    isProxy,
-    adminAddress,
-    adminIsContract,
-    implBytecode
-  );
-  const auditHistory = analyzeAuditHistory(normalizedAddress);
-  const killSwitch = analyzeKillSwitch(hasPauseSelectors);
-  const sealCompliance = analyzeSealCompliance(
-    normalizedAddress,
-    multisig,
-    upgradeability,
-    killSwitch
-  );
-
-  const checks = {
-    multisig,
-    privilegedRoles,
-    proxy,
-    upgradeability,
-    auditHistory,
-    killSwitch,
-    sealCompliance,
-  };
-
-  const overallScore = computeScore(checks);
-
-  return {
-    address: normalizedAddress,
-    chain: "ethereum",
-    timestamp: Date.now(),
-    overallScore,
-    isContract: true,
-    checks,
-    metadata: {
-      bytecodeSize: (bytecode.length - 2) / 2,
-      hasSourceCode: false, // Would need Etherscan API
-      implementationAddress: implAddress,
-      adminAddress,
-    },
-  };
+function bytecodeHas(bytecode: string, selector: string): boolean {
+  return bytecode.includes(selector);
 }
 
 function slotToAddress(slotValue: string): string | null {
   if (!slotValue || slotValue === "0x" + "0".repeat(64)) return null;
   const addr = "0x" + slotValue.slice(26);
   if (addr === "0x" + "0".repeat(40)) return null;
-  return getAddress(addr);
+  try {
+    return getAddress(addr);
+  } catch {
+    return null;
+  }
 }
 
-function analyzeMultisig(
-  safeSelectors: string[],
-  adminAddress: string | null,
-  adminIsContract: boolean
-): CheckResult {
-  if (safeSelectors.length >= 2) {
-    return check(
-      "multisig",
-      "Multi-Sig Status",
-      "pass",
-      "info",
-      "Contract bytecode contains Gnosis Safe signatures (execTransaction, owner management)"
-    );
-  }
-  if (adminAddress && adminIsContract) {
-    return check(
-      "multisig",
-      "Multi-Sig Status",
-      "pass",
-      "info",
-      `Admin (${adminAddress}) is a contract — likely a multi-sig or governance contract`
-    );
-  }
-  if (adminAddress && !adminIsContract) {
-    return check(
-      "multisig",
-      "Multi-Sig Status",
-      "fail",
-      "critical",
-      `Admin (${adminAddress}) is an EOA — single point of failure, no multi-sig protection`
-    );
-  }
-  return check(
-    "multisig",
-    "Multi-Sig Status",
-    "unknown",
-    "medium",
-    "No admin slot detected. Ownership pattern unclear from bytecode alone"
-  );
-}
+async function scanContract(
+  contract: ContractRole,
+  provider: JsonRpcProvider
+): Promise<ContractScanResult> {
+  const address = contract.address;
+  const bytecode = await provider.getCode(address);
+  const isContract = bytecode !== "0x" && bytecode.length > 2;
 
-function analyzeRoles(
-  roleSelectors: string[],
-  bytecode: string
-): CheckResult {
-  const hasAccessControl = roleSelectors.some(
-    (s) => s === "0x2f2ff15d" || s === "0x91d14854"
-  );
-  const hasOwnable = roleSelectors.some(
-    (s) => s === "0xf2fde38b" || s === "0x715018a6"
-  );
-  const hasRenounce = roleSelectors.includes("0x715018a6");
+  if (!isContract) {
+    return {
+      address,
+      name: contract.name,
+      description: contract.description,
+      impacts: contract.impacts,
+      holdsUserFunds: contract.holdsUserFunds,
+      holdsTreasury: contract.holdsTreasury,
+      isContract: false,
+      bytecodeSize: 0,
+      isProxy: false,
+      implementationAddress: null,
+      adminAddress: null,
+      adminIsContract: false,
+      hasPauseability: false,
+      hasOwnership: false,
+      hasAccessControl: false,
+      hasRenounced: false,
+      riskLevel: "unknown",
+    };
+  }
 
-  if (hasAccessControl) {
-    return check(
-      "privilegedRoles",
-      "Privileged Roles",
-      "warn",
-      "medium",
-      `AccessControl detected (grantRole/revokeRole). Multiple privileged roles may exist. Review role assignments on-chain.`
-    );
-  }
-  if (hasOwnable && hasRenounce) {
-    return check(
-      "privilegedRoles",
-      "Privileged Roles",
-      "warn",
-      "low",
-      "Ownable pattern with renounceOwnership available. Single owner role — verify if ownership has been renounced."
-    );
-  }
-  if (hasOwnable) {
-    return check(
-      "privilegedRoles",
-      "Privileged Roles",
-      "warn",
-      "medium",
-      "Ownable pattern detected (transferOwnership). Single privileged owner role exists."
-    );
-  }
-  if (roleSelectors.length === 0) {
-    return check(
-      "privilegedRoles",
-      "Privileged Roles",
-      "pass",
-      "info",
-      "No standard ownership or role management selectors found in bytecode. May be immutable or use a non-standard pattern."
-    );
-  }
-  return check(
-    "privilegedRoles",
-    "Privileged Roles",
-    "unknown",
-    "low",
-    `Found ${roleSelectors.length} role-related selectors but pattern is unclear.`
-  );
-}
+  // Check proxy slots
+  const [implSlotRaw, adminSlotRaw] = await Promise.all([
+    provider.getStorage(address, IMPLEMENTATION_SLOT),
+    provider.getStorage(address, ADMIN_SLOT),
+  ]);
 
-function analyzeProxy(
-  isProxy: boolean,
-  implAddress: string | null,
-  beaconAddress: string | null
-): CheckResult {
-  if (beaconAddress) {
-    return check(
-      "proxy",
-      "Proxy Pattern",
-      "warn",
-      "medium",
-      `Beacon proxy detected. Beacon at ${beaconAddress}. All proxies sharing this beacon can be upgraded simultaneously.`
-    );
-  }
+  const implAddress = slotToAddress(implSlotRaw);
+  const adminAddress = slotToAddress(adminSlotRaw);
+  const isProxy = implAddress !== null;
+
+  // Get implementation bytecode for deeper analysis
+  let analysisBytecode = bytecode;
   if (implAddress) {
-    return check(
-      "proxy",
-      "Proxy Pattern",
-      "warn",
-      "medium",
-      `Transparent/UUPS proxy detected. Implementation at ${implAddress}. Contract logic can be changed by the admin.`
-    );
-  }
-  return check(
-    "proxy",
-    "Proxy Pattern",
-    "pass",
-    "info",
-    "No EIP-1967 proxy pattern detected. Contract appears to be non-upgradeable."
-  );
-}
-
-function analyzeUpgradeability(
-  isProxy: boolean,
-  adminAddress: string | null,
-  adminIsContract: boolean,
-  implBytecode: string
-): CheckResult {
-  if (!isProxy) {
-    return check(
-      "upgradeability",
-      "Upgradeability",
-      "pass",
-      "info",
-      "Contract is not upgradeable. Logic is immutable once deployed."
-    );
+    const implCode = await provider.getCode(implAddress);
+    if (implCode.length > 2) analysisBytecode = implCode;
   }
 
-  const hasTimelockPatterns =
-    implBytecode.includes("54494d454c4f434b") || // "TIMELOCK" in hex
-    bytecodeHasSelector(implBytecode, "0x0e18b681") || // queue
-    bytecodeHasSelector(implBytecode, "0x61461954"); // executeTransaction
-
-  if (adminIsContract && hasTimelockPatterns) {
-    return check(
-      "upgradeability",
-      "Upgradeability",
-      "warn",
-      "low",
-      "Upgradeable proxy with timelock-governed admin. Upgrades have a delay period."
-    );
-  }
-  if (adminIsContract) {
-    return check(
-      "upgradeability",
-      "Upgradeability",
-      "warn",
-      "medium",
-      `Upgradeable proxy. Admin (${adminAddress}) is a contract (likely multi-sig/governance). No timelock detected.`
-    );
-  }
+  // Check admin type
+  let adminIsContract = false;
   if (adminAddress) {
-    return check(
-      "upgradeability",
-      "Upgradeability",
-      "fail",
-      "critical",
-      `Upgradeable proxy with EOA admin (${adminAddress}). Contract can be upgraded instantly by a single key holder.`
-    );
-  }
-  return check(
-    "upgradeability",
-    "Upgradeability",
-    "warn",
-    "high",
-    "Proxy detected but admin address could not be determined. Upgradeability risk unclear."
-  );
-}
-
-function analyzeAuditHistory(_address: string): CheckResult {
-  // In production, this would query audit registries, Etherscan verified status, etc.
-  return check(
-    "auditHistory",
-    "Audit History",
-    "unknown",
-    "medium",
-    "No on-chain audit registry available. Check Etherscan, Immunefi, or the project's documentation for audit reports."
-  );
-}
-
-function analyzeKillSwitch(pauseSelectors: string[]): CheckResult {
-  const hasPause = pauseSelectors.some((s) => s === "0x8456cb59");
-  const hasUnpause = pauseSelectors.some((s) => s === "0x3f4ba83a");
-  const hasPausedCheck = pauseSelectors.some((s) => s === "0x5c975abb");
-
-  if (hasPause && hasUnpause) {
-    return check(
-      "killSwitch",
-      "Kill Switch / Pause",
-      "warn",
-      "medium",
-      "Pausable pattern detected (pause/unpause). A privileged account can halt contract operations. Verify who holds the pauser role."
-    );
-  }
-  if (hasPause) {
-    return check(
-      "killSwitch",
-      "Kill Switch / Pause",
-      "fail",
-      "high",
-      "Pause function detected without unpause. Contract may be permanently freezable — potential kill switch."
-    );
-  }
-  if (hasPausedCheck) {
-    return check(
-      "killSwitch",
-      "Kill Switch / Pause",
-      "warn",
-      "low",
-      "Contract checks paused() state but pause/unpause selectors not found in this contract. May be inherited or external."
-    );
-  }
-  return check(
-    "killSwitch",
-    "Kill Switch / Pause",
-    "pass",
-    "info",
-    "No pausable/kill switch pattern detected in bytecode."
-  );
-}
-
-function analyzeSealCompliance(
-  _address: string,
-  multisig: CheckResult,
-  upgradeability: CheckResult,
-  killSwitch: CheckResult
-): CheckResult {
-  // SEAL org requires: multi-sig admin, timelock on upgrades, no unilateral kill switch
-  const issues: string[] = [];
-  if (multisig.status === "fail") issues.push("no multi-sig admin");
-  if (upgradeability.status === "fail")
-    issues.push("upgradeable by EOA without timelock");
-  if (killSwitch.status === "fail") issues.push("potential kill switch");
-
-  if (issues.length === 0 && multisig.status === "pass") {
-    return check(
-      "sealCompliance",
-      "SEAL Org Compliance",
-      "pass",
-      "info",
-      "Contract meets basic SEAL org security requirements: multi-sig governance, controlled upgradeability, no unilateral kill switch."
-    );
-  }
-  if (issues.length > 0) {
-    return check(
-      "sealCompliance",
-      "SEAL Org Compliance",
-      "fail",
-      "high",
-      `Does not meet SEAL org requirements: ${issues.join(", ")}. Address these before seeking SEAL certification.`
-    );
-  }
-  return check(
-    "sealCompliance",
-    "SEAL Org Compliance",
-    "unknown",
-    "medium",
-    "Insufficient data to determine SEAL compliance. Manual review recommended."
-  );
-}
-
-function computeScore(checks: SecurityReport["checks"]): number {
-  const weights: Record<string, number> = {
-    multisig: 20,
-    privilegedRoles: 15,
-    proxy: 10,
-    upgradeability: 20,
-    auditHistory: 15,
-    killSwitch: 10,
-    sealCompliance: 10,
-  };
-
-  const statusScore: Record<CheckStatus, number> = {
-    pass: 1,
-    warn: 0.6,
-    unknown: 0.4,
-    fail: 0,
-  };
-
-  let score = 0;
-  for (const [key, result] of Object.entries(checks)) {
-    const weight = weights[key] ?? 10;
-    score += weight * statusScore[result.status];
+    const adminCode = await provider.getCode(adminAddress);
+    adminIsContract = adminCode !== "0x" && adminCode.length > 2;
   }
 
-  return Math.round(score);
-}
+  // Detect function patterns
+  const bc = analysisBytecode.slice(2); // strip 0x
+  const hasPauseability = PAUSE_SELECTORS.some((s) => bytecodeHas(bc, s));
+  const hasOwnership = OWNERSHIP_SELECTORS.some((s) => bytecodeHas(bc, s));
+  const hasAccessControl = ACCESS_CONTROL_SELECTORS.some((s) => bytecodeHas(bc, s));
+  const hasRenounced = bytecodeHas(bc, "715018a6"); // renounceOwnership
+  const hasTimelockPatterns = TIMELOCK_SELECTORS.some((s) => bytecodeHas(bc, s));
 
-function eoaReport(address: string): SecurityReport {
-  const eoaCheck = (id: string, label: string): CheckResult =>
-    check(id, label, "fail", "critical", "Address is an EOA, not a contract.");
+  // Classify risk level
+  let riskLevel: ContractScanResult["riskLevel"];
+  if (!isProxy && !hasOwnership && !hasAccessControl) {
+    riskLevel = "immutable";
+  } else if (isProxy && adminAddress && !adminIsContract) {
+    riskLevel = "upgradeable-eoa";
+  } else if (isProxy && adminIsContract) {
+    riskLevel = hasTimelockPatterns ? "governed" : "upgradeable-governed";
+  } else if (hasOwnership || hasAccessControl) {
+    riskLevel = "governed";
+  } else {
+    riskLevel = "unknown";
+  }
 
   return {
     address,
-    chain: "ethereum",
+    name: contract.name,
+    description: contract.description,
+    impacts: contract.impacts,
+    holdsUserFunds: contract.holdsUserFunds,
+    holdsTreasury: contract.holdsTreasury,
+    isContract: true,
+    bytecodeSize: (bytecode.length - 2) / 2,
+    isProxy,
+    implementationAddress: implAddress,
+    adminAddress,
+    adminIsContract,
+    hasPauseability,
+    hasOwnership,
+    hasAccessControl,
+    hasRenounced,
+    riskLevel,
+  };
+}
+
+function generateAttackScenarios(
+  protocol: ProtocolDefinition,
+  scans: ContractScanResult[]
+): AttackScenario[] {
+  const scenarios: AttackScenario[] = [];
+  let id = 0;
+
+  // Group contracts by admin
+  const adminGroups = new Map<string, ContractScanResult[]>();
+  for (const scan of scans) {
+    if (scan.adminAddress) {
+      const key = scan.adminAddress;
+      if (!adminGroups.has(key)) adminGroups.set(key, []);
+      adminGroups.get(key)!.push(scan);
+    }
+  }
+
+  // Scenario: for each admin, what happens if that key is compromised?
+  for (const [adminAddr, controlled] of adminGroups) {
+    const isEOA = controlled.some((c) => !c.adminIsContract);
+    const affectedNames = controlled.map((c) => c.name);
+    const allImpacts = new Set<ImpactCategory>();
+    let userFundsAtRisk = false;
+    let treasuryAtRisk = false;
+
+    for (const c of controlled) {
+      for (const impact of c.impacts) allImpacts.add(impact);
+      if (c.holdsUserFunds) userFundsAtRisk = true;
+      if (c.holdsTreasury) treasuryAtRisk = true;
+    }
+
+    const impactParts: string[] = [];
+    if (userFundsAtRisk) impactParts.push("drain user deposits");
+    if (treasuryAtRisk) impactParts.push("steal protocol treasury");
+    if (allImpacts.has("token-logic")) impactParts.push("manipulate token behavior (mint, transfer rules)");
+    if (allImpacts.has("protocol-halt")) impactParts.push("permanently halt the protocol");
+    if (allImpacts.has("fee-extraction")) impactParts.push("redirect protocol fees");
+    if (allImpacts.has("oracle")) impactParts.push("manipulate price feeds to trigger mass liquidations");
+
+    if (impactParts.length === 0) continue;
+
+    const severity: Severity = userFundsAtRisk
+      ? "critical"
+      : treasuryAtRisk
+        ? "high"
+        : "medium";
+
+    scenarios.push({
+      id: `attack-${++id}`,
+      title: isEOA
+        ? `Private key leak: admin EOA (${adminAddr.slice(0, 8)}...)`
+        : `Multisig compromise: admin contract (${adminAddr.slice(0, 8)}...)`,
+      severity,
+      vector: isEOA
+        ? `Single private key controls ${controlled.length} contract(s). Social engineering, malware, or insider threat could expose this key.`
+        : `Multisig at ${adminAddr.slice(0, 10)}... controls ${controlled.length} contract(s). Requires compromising multiple signers.`,
+      affectedContracts: affectedNames,
+      capability: `Attacker could upgrade or reconfigure: ${affectedNames.join(", ")}`,
+      userImpact: impactParts.length > 0
+        ? `Attacker could: ${impactParts.join("; ")}`
+        : "Limited direct impact on user funds",
+      impactCategories: Array.from(allImpacts),
+      hasTimelock: controlled.some((c) => c.riskLevel === "governed"),
+      timelockDuration: controlled.some((c) => c.riskLevel === "governed")
+        ? "Unknown (check governance docs)"
+        : undefined,
+    });
+  }
+
+  // Scenario: upgradeable proxy holding user funds
+  for (const scan of scans) {
+    if (scan.isProxy && scan.holdsUserFunds) {
+      scenarios.push({
+        id: `attack-${++id}`,
+        title: `Proxy upgrade: ${scan.name} holds user funds`,
+        severity: "critical",
+        vector: `${scan.name} is an upgradeable proxy. The implementation can be swapped to a malicious contract that drains all deposited funds.`,
+        affectedContracts: [scan.name],
+        capability: `Replace implementation at ${scan.implementationAddress?.slice(0, 10)}... with a contract containing a sweep function`,
+        userImpact: "All user funds deposited in this contract could be drained in a single transaction after upgrade",
+        impactCategories: ["user-funds"],
+        hasTimelock: scan.riskLevel === "governed",
+        timelockDuration: scan.riskLevel === "governed" ? "Check governance" : undefined,
+      });
+    }
+  }
+
+  // Scenario: pausable contracts
+  for (const scan of scans) {
+    if (scan.hasPauseability && (scan.holdsUserFunds || scan.impacts.includes("user-funds"))) {
+      scenarios.push({
+        id: `attack-${++id}`,
+        title: `Emergency pause: ${scan.name} can be frozen`,
+        severity: "medium",
+        vector: `${scan.name} has pause functionality. A privileged account can halt operations, preventing withdrawals.`,
+        affectedContracts: [scan.name],
+        capability: "Pause contract operations, blocking user withdrawals and interactions",
+        userImpact: "Users cannot withdraw funds while paused. Funds are not stolen but are temporarily inaccessible.",
+        impactCategories: ["protocol-halt"],
+        hasTimelock: false,
+      });
+    }
+  }
+
+  // Sort by severity
+  const severityOrder: Record<Severity, number> = {
+    critical: 0, high: 1, medium: 2, low: 3, info: 4,
+  };
+  scenarios.sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+
+  return scenarios;
+}
+
+export async function analyzeProtocol(
+  protocol: ProtocolDefinition,
+  rpcUrl: string
+): Promise<ProtocolReport> {
+  const provider = new JsonRpcProvider(rpcUrl);
+
+  // Scan all contracts in parallel
+  const scans = await Promise.all(
+    protocol.contracts.map((c) => scanContract(c, provider))
+  );
+
+  // Generate attack scenarios
+  const attackScenarios = generateAttackScenarios(protocol, scans);
+
+  // Compute summary
+  const immutableContracts = scans.filter((s) => s.riskLevel === "immutable").length;
+  const upgradeableContracts = scans.filter((s) =>
+    s.riskLevel === "upgradeable-eoa" || s.riskLevel === "upgradeable-governed"
+  ).length;
+
+  const uniqueAdmins = new Set(scans.filter((s) => s.adminAddress).map((s) => s.adminAddress));
+
+  const userFundsAtRisk = scans.some(
+    (s) => s.holdsUserFunds && s.riskLevel !== "immutable"
+  );
+  const treasuryAtRisk = scans.some(
+    (s) => s.holdsTreasury && s.riskLevel !== "immutable"
+  );
+  const hasTimelock = scans.some((s) => s.riskLevel === "governed");
+
+  // Overall risk score
+  let score = 100;
+  // Deductions
+  if (scans.some((s) => s.riskLevel === "upgradeable-eoa")) score -= 30;
+  if (userFundsAtRisk) score -= 20;
+  if (treasuryAtRisk) score -= 10;
+  if (!hasTimelock && upgradeableContracts > 0) score -= 15;
+  if (upgradeableContracts > scans.length / 2) score -= 10;
+  for (const scenario of attackScenarios) {
+    if (scenario.severity === "critical") score -= 5;
+  }
+  score = Math.max(0, Math.min(100, score));
+
+  return {
+    protocol,
     timestamp: Date.now(),
-    overallScore: 0,
-    isContract: false,
-    checks: {
-      multisig: eoaCheck("multisig", "Multi-Sig Status"),
-      privilegedRoles: eoaCheck("privilegedRoles", "Privileged Roles"),
-      proxy: eoaCheck("proxy", "Proxy Pattern"),
-      upgradeability: eoaCheck("upgradeability", "Upgradeability"),
-      auditHistory: eoaCheck("auditHistory", "Audit History"),
-      killSwitch: eoaCheck("killSwitch", "Kill Switch / Pause"),
-      sealCompliance: eoaCheck("sealCompliance", "SEAL Org Compliance"),
-    },
-    metadata: {
-      bytecodeSize: 0,
-      hasSourceCode: false,
-      implementationAddress: null,
-      adminAddress: null,
+    overallRiskScore: score,
+    contracts: scans,
+    attackScenarios,
+    summary: {
+      totalContracts: scans.length,
+      immutableContracts,
+      upgradeableContracts,
+      uniqueAdmins: uniqueAdmins.size,
+      userFundsAtRisk,
+      treasuryAtRisk,
+      hasTimelock,
     },
   };
 }
