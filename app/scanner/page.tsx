@@ -123,8 +123,11 @@ export default function ScannerPage() {
             <div className="text-[12px] text-text-muted">
               Scanning all contracts on-chain...
             </div>
-            <div className="text-[10px] text-text-muted">
-              Reading bytecode, proxy slots, and admin addresses
+            <div className="text-[10px] text-text-muted space-y-1 text-center">
+              <div>Reading bytecode, proxy slots, admin addresses</div>
+              <div>Resolving Gnosis Safe signers + ENS names</div>
+              <div>Fetching live TVL from DeFiLlama</div>
+              <div>Computing SEAL compliance score</div>
             </div>
           </div>
         )}

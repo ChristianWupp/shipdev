@@ -8,6 +8,7 @@ export const PROTOCOLS: ProtocolDefinition[] = [
     website: "https://aave.com",
     description: "Decentralized lending and borrowing protocol. Users deposit assets to earn yield, borrowers take overcollateralized loans.",
     tvl: "$12.4B",
+    defillamaSlug: "aave",
     contracts: [
       {
         name: "Pool (Proxy)",
@@ -66,6 +67,7 @@ export const PROTOCOLS: ProtocolDefinition[] = [
     website: "https://uniswap.org",
     description: "Concentrated liquidity AMM. LPs provide liquidity in price ranges, traders swap tokens.",
     tvl: "$5.2B",
+    defillamaSlug: "uniswap",
     contracts: [
       {
         name: "UniswapV3Factory",
@@ -116,6 +118,7 @@ export const PROTOCOLS: ProtocolDefinition[] = [
     website: "https://lido.fi",
     description: "Liquid staking protocol. Users deposit ETH and receive stETH, which accrues staking rewards.",
     tvl: "$25.8B",
+    defillamaSlug: "lido",
     contracts: [
       {
         name: "Lido (stETH Proxy)",
@@ -174,6 +177,7 @@ export const PROTOCOLS: ProtocolDefinition[] = [
     website: "https://makerdao.com",
     description: "CDP-based stablecoin protocol. Users lock collateral to mint DAI. Governance controls risk parameters.",
     tvl: "$8.1B",
+    defillamaSlug: "makerdao",
     contracts: [
       {
         name: "Vat (Core Engine)",

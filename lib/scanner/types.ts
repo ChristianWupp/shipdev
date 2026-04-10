@@ -13,15 +13,31 @@ export type ImpactCategory =
   | "oracle"          // Attacker can manipulate price feeds
   | "none";           // Immutable, no admin control
 
+export interface SignerInfo {
+  address: string;
+  ensName: string | null;
+  label: string | null; // Etherscan-style label if known
+}
+
+export interface MultisigInfo {
+  type: "safe" | "multisig" | "unknown-contract" | "eoa";
+  threshold: number | null;
+  signerCount: number | null;
+  signers: SignerInfo[];
+}
+
+export interface TimelockInfo {
+  detected: boolean;
+  minDelay: number | null; // seconds
+  formatted: string | null; // "48 hours", "7 days"
+}
+
 export interface ContractRole {
   name: string;
   address: string;
   description: string;
-  /** What this contract controls or holds */
   impacts: ImpactCategory[];
-  /** Is this where user funds sit? */
   holdsUserFunds: boolean;
-  /** Is this where treasury sits? */
   holdsTreasury: boolean;
 }
 
@@ -32,6 +48,7 @@ export interface ProtocolDefinition {
   website: string;
   description: string;
   tvl?: string;
+  defillamaSlug?: string; // For live TVL lookup
   contracts: ContractRole[];
 }
 
@@ -49,6 +66,9 @@ export interface ContractScanResult {
   implementationAddress: string | null;
   adminAddress: string | null;
   adminIsContract: boolean;
+  /** Admin details */
+  adminInfo: MultisigInfo | null;
+  timelockInfo: TimelockInfo | null;
   /** Function patterns detected */
   hasPauseability: boolean;
   hasOwnership: boolean;
@@ -62,27 +82,35 @@ export interface AttackScenario {
   id: string;
   title: string;
   severity: Severity;
-  /** What gets compromised (the admin key, multisig, etc.) */
   vector: string;
-  /** Which contracts are affected */
   affectedContracts: string[];
-  /** What the attacker can do */
   capability: string;
-  /** Who loses money and how */
   userImpact: string;
-  /** What category of impact */
   impactCategories: ImpactCategory[];
-  /** Is there a timelock or other delay? */
   hasTimelock: boolean;
   timelockDuration?: string;
+}
+
+export interface SealCheck {
+  id: string;
+  label: string;
+  status: CheckStatus;
+  detail: string;
+}
+
+export interface SealCompliance {
+  score: number; // 0-100
+  checks: SealCheck[];
 }
 
 export interface ProtocolReport {
   protocol: ProtocolDefinition;
   timestamp: number;
-  overallRiskScore: number; // 0-100 (100 = safest)
+  overallRiskScore: number;
+  liveTvl: number | null; // USD from DeFiLlama
   contracts: ContractScanResult[];
   attackScenarios: AttackScenario[];
+  sealCompliance: SealCompliance;
   summary: {
     totalContracts: number;
     immutableContracts: number;
@@ -91,5 +119,6 @@ export interface ProtocolReport {
     userFundsAtRisk: boolean;
     treasuryAtRisk: boolean;
     hasTimelock: boolean;
+    maxTimelockDelay: string | null;
   };
 }
