@@ -27,7 +27,7 @@ export const PROTOCOLS: ProtocolDefinition[] = [
       },
       {
         name: "ACLManager",
-        address: "0xc2aaCf6553D20d1e9166F9169e23631E4F15fD38",
+        address: "0xC2AACf6553D20D1E9166f9169e23631E4F15FD38",
         description: "Access control list. Manages who has POOL_ADMIN, EMERGENCY_ADMIN, RISK_ADMIN, ASSET_LISTING_ADMIN roles.",
         impacts: ["governance"],
         holdsUserFunds: false,
