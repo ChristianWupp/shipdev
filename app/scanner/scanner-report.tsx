@@ -18,6 +18,32 @@ function formatTvl(tvl: number): string {
   return `$${tvl.toLocaleString()}`;
 }
 
+const EXPLORER_URLS: Record<string, string> = {
+  ethereum: "https://etherscan.io",
+  arbitrum: "https://arbiscan.io",
+  base: "https://basescan.org",
+  optimism: "https://optimistic.etherscan.io",
+};
+
+function explorerLink(address: string, chain: string): string {
+  const base = EXPLORER_URLS[chain] ?? EXPLORER_URLS.ethereum;
+  return `${base}/address/${address}`;
+}
+
+function ExplorerLink({ address, chain, short }: { address: string; chain: string; short?: boolean }) {
+  const display = short ? `${address.slice(0, 6)}...${address.slice(-4)}` : address;
+  return (
+    <a
+      href={explorerLink(address, chain)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="font-mono text-text-muted hover:text-accent transition-colors underline decoration-border hover:decoration-accent"
+    >
+      {display}
+    </a>
+  );
+}
+
 const severityColors: Record<Severity, { text: string; bg: string }> = {
   critical: { text: "var(--error)", bg: "rgba(248, 113, 113, 0.1)" },
   high: { text: "#fb923c", bg: "rgba(251, 146, 60, 0.1)" },
@@ -43,7 +69,7 @@ const statusColors: Record<CheckStatus, { icon: string; color: string }> = {
 
 /* ── Contract Card ── */
 
-function ContractCard({ scan }: { scan: ContractScanResult }) {
+function ContractCard({ scan, chain }: { scan: ContractScanResult; chain: string }) {
   const risk = riskLabels[scan.riskLevel];
   const adminInfo = scan.adminInfo;
 
@@ -65,13 +91,13 @@ function ContractCard({ scan }: { scan: ContractScanResult }) {
       <p className="text-[11px] text-text-muted leading-[1.5] mb-3">{scan.description}</p>
 
       <div className="flex items-center gap-3 text-[10px] mb-2 flex-wrap">
-        <span className="font-mono text-text-muted">{scan.address.slice(0, 6)}...{scan.address.slice(-4)}</span>
+        <ExplorerLink address={scan.address} chain={chain} short />
         {scan.implementationAddress && (
-          <span className="text-text-muted">impl: <span className="font-mono text-text-secondary">{scan.implementationAddress.slice(0, 8)}...</span></span>
+          <span className="text-text-muted">impl: <ExplorerLink address={scan.implementationAddress} chain={chain} short /></span>
         )}
         {scan.adminAddress && (
           <span className="text-text-muted">
-            admin: <span className="font-mono text-text-secondary">{scan.adminAddress.slice(0, 8)}...</span>
+            admin: <ExplorerLink address={scan.adminAddress} chain={chain} short />
             {adminInfo?.type === "eoa" && <span className="text-error ml-1">(EOA)</span>}
             {adminInfo?.type === "safe" && (
               <span className="text-accent ml-1">({adminInfo.threshold}-of-{adminInfo.signerCount} Safe)</span>
@@ -91,13 +117,14 @@ function ContractCard({ scan }: { scan: ContractScanResult }) {
           </div>
           <div className="flex flex-wrap gap-1">
             {adminInfo.signers.map((signer) => (
-              <span key={signer.address} className="text-[10px] font-mono bg-surface-elevated border border-border rounded px-2 py-[2px]">
+              <a key={signer.address} href={explorerLink(signer.address, chain)} target="_blank" rel="noopener noreferrer"
+                className="text-[10px] font-mono bg-surface-elevated border border-border rounded px-2 py-[2px] hover:border-accent/30 transition-colors">
                 {signer.ensName ? (
                   <span className="text-accent">{signer.ensName}</span>
                 ) : (
                   <span className="text-text-muted">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</span>
                 )}
-              </span>
+              </a>
             ))}
           </div>
         </div>
@@ -392,7 +419,7 @@ export function ScannerReport({ report }: { report: ProtocolReport }) {
         </div>
         <div className="grid grid-cols-1 gap-3">
           {contracts.map((scan) => (
-            <ContractCard key={scan.address} scan={scan} />
+            <ContractCard key={scan.address} scan={scan} chain={protocol.chain} />
           ))}
         </div>
       </div>
@@ -427,9 +454,57 @@ export function ScannerReport({ report }: { report: ProtocolReport }) {
         </p>
       </div>
 
+      {/* Methodology & how to verify */}
+      <div className="bg-surface border border-border rounded-[10px] p-5 mb-6">
+        <div className="text-[10px] uppercase tracking-[1px] text-accent font-semibold mb-3">
+          How This Works — Verify It Yourself
+        </div>
+
+        <div className="space-y-3 text-[11px] text-text-secondary leading-[1.6]">
+          <div>
+            <span className="text-text-primary font-medium">What we check on-chain:</span> For each contract, we read the bytecode via RPC, check{" "}
+            <a href="https://eips.ethereum.org/EIPS/eip-1967" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">EIP-1967</a>{" "}
+            storage slots for proxy/admin detection, call <span className="font-mono text-accent">getOwners()</span> and{" "}
+            <span className="font-mono text-accent">getThreshold()</span> on admin contracts (Gnosis Safe), and{" "}
+            <span className="font-mono text-accent">getMinDelay()</span> for timelocks. ENS names via reverse lookup. TVL from{" "}
+            <a href="https://defillama.com" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">DeFiLlama API</a>.
+          </div>
+
+          <div>
+            <span className="text-text-primary font-medium">How to verify proxy status yourself:</span> Go to any contract on{" "}
+            <a href={EXPLORER_URLS[protocol.chain]} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+              {protocol.chain === "ethereum" ? "Etherscan" : protocol.chain}
+            </a>
+            {" "}&rarr; click &quot;More Options&quot; &rarr; &quot;Is this a proxy?&quot; &rarr; Etherscan will show you the implementation address. Or read storage slot{" "}
+            <span className="font-mono text-[10px] text-text-muted">0x3608...2bbc</span> directly.
+          </div>
+
+          <div>
+            <span className="text-text-primary font-medium">How to verify Safe signers:</span> Go to the admin address on Etherscan &rarr; &quot;Read Contract&quot; &rarr;{" "}
+            call <span className="font-mono text-accent">getOwners()</span> and <span className="font-mono text-accent">getThreshold()</span>.
+            Or check <a href="https://app.safe.global" target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">app.safe.global</a> directly.
+          </div>
+
+          <div className="border-t border-border pt-3">
+            <span className="text-warning font-medium">What we DON&apos;T check:</span> This scanner only analyzes the contracts listed above.
+            Most protocols have additional contracts (auxiliary modules, collateral adapters, oracles, periphery).
+            We don&apos;t verify source code, audit reports, or off-chain infrastructure (frontends, APIs, DNS).
+            Always cross-reference with the protocol&apos;s own documentation and audit reports.
+          </div>
+
+          <div>
+            <span className="text-warning font-medium">Contract selection is not exhaustive:</span> We scan {summary.totalContracts} key contracts
+            for {protocol.name}. The full protocol may have dozens more. Use the &quot;Custom scan&quot; option above to add any contract address you want to check.
+          </div>
+        </div>
+      </div>
+
       <div className="text-[10px] text-text-muted text-right">
         Scanned {new Date(report.timestamp).toLocaleString()} | {protocol.chain}
-        {liveTvl && " | TVL via DeFiLlama"}
+        {liveTvl && " | TVL via DeFiLlama"} | All data from on-chain reads — verify on{" "}
+        <a href={EXPLORER_URLS[protocol.chain]} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+          {protocol.chain === "ethereum" ? "Etherscan" : protocol.chain}
+        </a>
       </div>
     </div>
   );

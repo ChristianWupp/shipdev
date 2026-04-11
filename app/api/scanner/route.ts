@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { isAddress } from "ethers";
 import { analyzeProtocol } from "@/lib/scanner/analyze";
 import { getProtocolById, PROTOCOLS } from "@/lib/scanner/protocols";
+import type { ProtocolDefinition, ContractRole } from "@/lib/scanner/types";
 
 const RPC_URLS: Record<string, string> = {
   ethereum: process.env.ETH_RPC_URL ?? "https://ethereum-rpc.publicnode.com",
@@ -11,19 +13,64 @@ const RPC_URLS: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { protocolId } = body;
+  const { protocolId, custom } = body;
 
-  if (!protocolId) {
-    return NextResponse.json(
-      { error: "Missing protocolId" },
-      { status: 400 }
-    );
-  }
+  let protocol: ProtocolDefinition;
 
-  const protocol = getProtocolById(protocolId);
-  if (!protocol) {
+  if (custom) {
+    // Custom protocol scan — user provides contracts directly
+    const { name, chain, contracts } = custom as {
+      name: string;
+      chain: string;
+      contracts: { address: string; name: string; description?: string }[];
+    };
+
+    if (!name || !chain || !contracts?.length) {
+      return NextResponse.json(
+        { error: "Custom scan requires name, chain, and at least one contract" },
+        { status: 400 }
+      );
+    }
+
+    // Validate all addresses
+    for (const c of contracts) {
+      if (!isAddress(c.address)) {
+        return NextResponse.json(
+          { error: `Invalid address: ${c.address}` },
+          { status: 400 }
+        );
+      }
+    }
+
+    const contractRoles: ContractRole[] = contracts.map((c) => ({
+      name: c.name || `Contract ${c.address.slice(0, 8)}`,
+      address: c.address,
+      description: c.description || "User-provided contract",
+      impacts: ["user-funds"], // Conservative default
+      holdsUserFunds: false,
+      holdsTreasury: false,
+    }));
+
+    protocol = {
+      id: "custom",
+      name,
+      chain,
+      website: "",
+      description: `Custom protocol scan with ${contracts.length} contract(s) on ${chain}`,
+      contracts: contractRoles,
+    };
+  } else if (protocolId) {
+    const found = getProtocolById(protocolId);
+    if (!found) {
+      return NextResponse.json(
+        { error: `Unknown protocol: ${protocolId}. Available: ${PROTOCOLS.map((p) => p.id).join(", ")}` },
+        { status: 400 }
+      );
+    }
+    protocol = found;
+  } else {
     return NextResponse.json(
-      { error: `Unknown protocol: ${protocolId}. Available: ${PROTOCOLS.map((p) => p.id).join(", ")}` },
+      { error: "Provide protocolId or custom scan data" },
       { status: 400 }
     );
   }
@@ -31,7 +78,7 @@ export async function POST(req: NextRequest) {
   const rpcUrl = RPC_URLS[protocol.chain];
   if (!rpcUrl) {
     return NextResponse.json(
-      { error: `No RPC configured for chain: ${protocol.chain}` },
+      { error: `Unsupported chain: ${protocol.chain}. Supported: ${Object.keys(RPC_URLS).join(", ")}` },
       { status: 400 }
     );
   }

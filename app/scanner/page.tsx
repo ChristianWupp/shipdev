@@ -46,12 +46,23 @@ interface ProtocolSummary {
   description: string;
 }
 
+const CHAINS = [
+  { id: "ethereum", label: "Ethereum" },
+  { id: "arbitrum", label: "Arbitrum" },
+  { id: "base", label: "Base" },
+  { id: "optimism", label: "Optimism" },
+];
+
 export default function ScannerPage() {
   const [protocols, setProtocols] = useState<ProtocolSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [report, setReport] = useState<ProtocolReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showCustom, setShowCustom] = useState(false);
+  const [customName, setCustomName] = useState("");
+  const [customChain, setCustomChain] = useState("ethereum");
+  const [customContracts, setCustomContracts] = useState("");
 
   useEffect(() => {
     fetch("/api/scanner")
@@ -62,6 +73,7 @@ export default function ScannerPage() {
 
   async function scan(protocolId: string) {
     setSelectedId(protocolId);
+    setShowCustom(false);
     setLoading(true);
     setError(null);
     setReport(null);
@@ -71,6 +83,46 @@ export default function ScannerPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ protocolId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Scan failed");
+      } else {
+        setReport(data as ProtocolReport);
+      }
+    } catch {
+      setError("Network error — could not reach scanner API");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function scanCustom() {
+    if (!customName.trim() || !customContracts.trim()) return;
+
+    // Parse addresses: one per line, format: "address name" or "address, name" or just "address"
+    const lines = customContracts.split("\n").filter((l) => l.trim());
+    const contracts = lines.map((line) => {
+      const parts = line.trim().split(/[\s,]+/);
+      const address = parts[0];
+      const name = parts.slice(1).join(" ") || `Contract ${address.slice(0, 8)}`;
+      return { address, name };
+    });
+
+    if (contracts.length === 0) return;
+
+    setSelectedId("custom");
+    setLoading(true);
+    setError(null);
+    setReport(null);
+
+    try {
+      const res = await fetch("/api/scanner", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          custom: { name: customName, chain: customChain, contracts },
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -146,7 +198,61 @@ export default function ScannerPage() {
               </button>
             ))}
           </div>
+
+          {/* Custom scan toggle */}
+          <button
+            onClick={() => setShowCustom(!showCustom)}
+            className="mt-3 text-[11px] text-accent hover:text-accent-hover cursor-pointer transition-colors"
+          >
+            {showCustom ? "Hide custom scan" : "Or scan any protocol — paste contract addresses"}
+          </button>
         </div>
+
+        {/* Custom scan form */}
+        {showCustom && (
+          <div className="bg-surface border border-border rounded-[10px] p-5 mb-8">
+            <div className="text-[10px] uppercase tracking-[1px] text-accent font-semibold mb-3">
+              Custom Protocol Scan
+            </div>
+            <div className="flex gap-3 mb-3">
+              <input
+                type="text"
+                value={customName}
+                onChange={(e) => setCustomName(e.target.value)}
+                placeholder="Protocol name"
+                className="flex-1 bg-surface-elevated border border-border rounded-[6px] px-3 py-[8px] text-[13px] text-text-primary placeholder:text-text-muted outline-none focus:border-accent/40"
+              />
+              <select
+                value={customChain}
+                onChange={(e) => setCustomChain(e.target.value)}
+                className="bg-surface-elevated border border-border rounded-[6px] px-3 py-[8px] text-[12px] text-text-secondary outline-none focus:border-accent/40 cursor-pointer"
+              >
+                {CHAINS.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            <textarea
+              value={customContracts}
+              onChange={(e) => setCustomContracts(e.target.value)}
+              placeholder={"Paste contract addresses, one per line:\n0x1234...abcd Pool Contract\n0x5678...efgh Treasury\n0x9abc...1234 Governance"}
+              rows={5}
+              className="w-full bg-surface-elevated border border-border rounded-[6px] px-3 py-[8px] text-[12px] font-mono text-text-primary placeholder:text-text-muted outline-none focus:border-accent/40 resize-none mb-3"
+            />
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] text-text-muted">
+                Format: address name (one per line)
+              </span>
+              <button
+                onClick={scanCustom}
+                disabled={loading || !customName.trim() || !customContracts.trim()}
+                className="bg-accent text-black rounded-[6px] px-5 py-[8px] text-[12px] font-semibold cursor-pointer hover:bg-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Scan Protocol
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Loading */}
         {loading && (
