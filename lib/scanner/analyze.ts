@@ -231,8 +231,11 @@ async function scanContract(
     riskLevel = "immutable";
   } else if (isProxy && adminAddress && !adminIsContract) {
     riskLevel = "upgradeable-eoa";
-  } else if (isProxy && adminIsContract) {
+  } else if (isProxy && adminAddress && adminIsContract) {
     riskLevel = (hasTimelockPatterns || timelockInfo?.detected) ? "governed" : "upgradeable-governed";
+  } else if (isProxy && !adminAddress) {
+    // Proxy without detected admin — still upgradeable, admin managed differently
+    riskLevel = "upgradeable-governed";
   } else if (hasOwnership || hasAccessControl) {
     riskLevel = "governed";
   } else {
@@ -348,25 +351,60 @@ function generateAttackScenarios(
     });
   }
 
-  // Proxy holding user funds
+  // Proxy holding user funds — differentiate governance vs EOA
   for (const scan of scans) {
     if (scan.isProxy && scan.holdsUserFunds) {
-      const adminDetail = scan.adminInfo?.type === "safe"
-        ? `Requires ${scan.adminInfo.threshold}-of-${scan.adminInfo.signerCount} signers`
-        : scan.adminIsContract
-          ? "Admin is a contract"
-          : "Admin is a single EOA — one key controls everything";
+      const isGovernanceControlled = scan.adminIsContract && scan.adminInfo?.type !== "eoa";
+      const hasTl = scan.timelockInfo?.detected ?? false;
+      const isSafe = scan.adminInfo?.type === "safe";
+
+      let severity: Severity;
+      let vector: string;
+      let userImpact: string;
+      let title: string;
+
+      if (!scan.adminIsContract) {
+        // EOA admin — worst case
+        severity = "critical";
+        title = `CRITICAL: ${scan.name} upgradeable by single key`;
+        vector = `${scan.name} is an upgradeable proxy${tvlStr ? ` securing ${tvlStr}` : ""}. The admin is a single EOA (externally owned account). One private key leak = all funds gone. No vote, no delay, no warning. This is the easiest target for social engineering, malware, or insider threats.`;
+        userImpact = `All user funds drained instantly. No timelock, no governance vote, no recovery window. One compromised laptop is enough.`;
+      } else if (isGovernanceControlled && hasTl) {
+        // Governance + timelock — best case for upgradeable
+        severity = "medium";
+        title = `Governance-controlled upgrade: ${scan.name}`;
+        vector = `${scan.name} is an upgradeable proxy${tvlStr ? ` securing ${tvlStr}` : ""}. Upgrades require a governance process: proposal → vote → ${scan.timelockInfo?.formatted ?? "timelock"} delay → execution. The implementation can theoretically be swapped to a malicious contract, but the governance process provides multiple checkpoints where the community can detect and respond to a malicious proposal.`;
+        userImpact = `In theory, all funds could be drained after a successful governance attack. In practice, this requires: (1) acquiring enough governance tokens to pass a vote, (2) submitting a proposal that passes community scrutiny, (3) waiting through the timelock delay while everyone can see what's coming. The real risk is a sophisticated proposal that looks legitimate but contains a hidden backdoor.`;
+      } else if (isSafe) {
+        // Multisig — middle ground
+        severity = "high";
+        title = `Multisig-controlled upgrade: ${scan.name}`;
+        vector = `${scan.name} is an upgradeable proxy${tvlStr ? ` securing ${tvlStr}` : ""}. Upgrades require ${scan.adminInfo!.threshold}-of-${scan.adminInfo!.signerCount} multisig signers to approve.${hasTl ? ` Changes are delayed by ${scan.timelockInfo?.formatted}.` : " No timelock detected — once signers approve, the upgrade is instant."} Compromising the required number of signers would allow a malicious upgrade.`;
+        userImpact = `All user funds at risk if ${scan.adminInfo!.threshold} signers are compromised simultaneously.${!hasTl ? " Without a timelock, there is no window for the community to react." : ""} Attack vectors: coordinated phishing, insider collusion, or state-sponsored targeting of individual signers.`;
+      } else if (!scan.adminAddress) {
+        // Proxy with no EIP-1967 admin detected — common with custom proxy patterns (Aave, etc.)
+        severity = "medium";
+        title = `Upgradeable proxy: ${scan.name} (non-standard admin)`;
+        vector = `${scan.name} is an upgradeable proxy${tvlStr ? ` securing ${tvlStr}` : ""}, but the admin is not stored in the standard EIP-1967 slot. This usually means the proxy is managed by a separate registry contract (like Aave's PoolAddressesProvider) or uses a custom upgrade pattern. The admin chain likely goes through governance, but verify on Etherscan.`;
+        userImpact = `Funds could be at risk if the upgrade path is compromised. Because the admin is non-standard, check the protocol's documentation for the full governance flow: who can propose upgrades, what vote is required, and what timelock delay exists.`;
+      } else {
+        // Unknown contract admin
+        severity = "high";
+        title = `Proxy upgrade: ${scan.name} holds user funds`;
+        vector = `${scan.name} is an upgradeable proxy${tvlStr ? ` securing ${tvlStr}` : ""}. The admin is a contract, but we could not determine if it's a Safe, governance contract, or timelock. The upgrade path is unclear — verify manually.`;
+        userImpact = `All user funds potentially at risk. Verify the admin contract's governance process on Etherscan.`;
+      }
 
       scenarios.push({
         id: `attack-${++id}`,
-        title: `Proxy upgrade: ${scan.name} holds user funds`,
-        severity: scan.adminInfo?.type === "eoa" ? "critical" : "high",
-        vector: `${scan.name} is an upgradeable proxy${tvlStr ? ` securing ${tvlStr}` : ""}. The implementation can be swapped to drain all deposited funds. ${adminDetail}.`,
+        title,
+        severity,
+        vector,
         affectedContracts: [scan.name],
         capability: `Replace implementation at ${scan.implementationAddress?.slice(0, 10)}... with a malicious contract`,
-        userImpact: `All user funds deposited in this contract could be drained in a single transaction after upgrade`,
+        userImpact,
         impactCategories: ["user-funds"],
-        hasTimelock: scan.timelockInfo?.detected ?? false,
+        hasTimelock: hasTl,
         timelockDuration: scan.timelockInfo?.formatted ?? undefined,
       });
     }

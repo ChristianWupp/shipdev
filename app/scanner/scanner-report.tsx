@@ -393,6 +393,38 @@ export function ScannerReport({ report }: { report: ProtocolReport }) {
       {/* Control flow diagram */}
       <ContractDiagram contracts={contracts} />
 
+      {/* Proxy explainer — only if there are upgradeable contracts */}
+      {summary.upgradeableContracts > 0 && (
+        <div className="bg-surface border border-border rounded-[10px] p-5 mb-8">
+          <div className="text-[10px] uppercase tracking-[1px] text-accent font-semibold mb-2">
+            Why upgradeable proxies exist
+          </div>
+          <p className="text-[12px] text-text-secondary leading-[1.6] mb-3">
+            Upgradeable proxies let protocols fix bugs and add features after deployment.
+            Your funds sit in the <span className="text-text-primary font-medium">proxy contract</span> (the address you deposit to),
+            but the actual logic runs from a separate <span className="text-text-primary font-medium">implementation contract</span>.
+            An admin can swap the implementation — which means they can change what the code does with your money.
+          </p>
+          <p className="text-[12px] text-text-secondary leading-[1.6] mb-3">
+            The security question is: <span className="text-text-primary font-medium">who is the admin, and what does it take for them to swap the implementation?</span>
+          </p>
+          <div className="grid grid-cols-3 gap-3 text-[11px]">
+            <div className="border border-error/20 bg-error/5 rounded-[6px] p-3">
+              <div className="text-error font-semibold mb-1">Worst: EOA admin</div>
+              <div className="text-text-muted">One private key controls everything. Leak = instant drain. No vote, no delay.</div>
+            </div>
+            <div className="border border-warning/20 bg-warning/5 rounded-[6px] p-3">
+              <div className="text-warning font-semibold mb-1">Better: Multisig</div>
+              <div className="text-text-muted">Multiple signers must approve. Need to compromise N signers simultaneously.</div>
+            </div>
+            <div className="border border-accent/20 bg-accent/5 rounded-[6px] p-3">
+              <div className="text-accent font-semibold mb-1">Best: Governance + timelock</div>
+              <div className="text-text-muted">Community votes, then a delay before execution. Everyone can see what&apos;s coming.</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Attack scenarios */}
       {attackScenarios.length > 0 && (
         <div className="mb-8">
