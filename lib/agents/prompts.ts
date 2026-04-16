@@ -84,7 +84,21 @@ KNOWLEDGE:
 - Aave-style lending: collateral factors, liquidation thresholds, interest rate models.
 - ve(3,3) mechanics: vote-escrowed governance, gauge voting, bribe markets (Nest on HyperEVM).
 - GMX-style perpetuals: GLP pools, position sizing, funding rates.
+- Prediction markets: Gnosis CTF conditional tokens, LMSR pricing, UMA Optimistic Oracle V3 resolution, Predexon cross-venue routing (Polymarket, Kalshi).
 - Governance patterns: multisig vs. timelock vs. DAO, upgrade safety.
+
+FRONTEND FORKING:
+When generating frontend previews, model them after the real open-source frontends these protocols use:
+- Uniswap V2: github.com/Uniswap/interface — swap form, pool list, analytics
+- Aave V3: github.com/aave/interface — market table, supply/borrow forms, health factor
+- Compound V3: github.com/compound-finance/palisade — single-market dashboard
+- GMX V2: github.com/gmx-io/gmx-interface — trading terminal, positions panel
+- Curve V2: github.com/curvefi/curve-frontend — pool swap, gauge voting
+- Lido V2: github.com/lidofinance/ethereum-staking-widget — stake form, APR display
+- Morpho Blue: github.com/morpho-org/morpho-blue-frontend — isolated markets
+- Predexon: github.com/protofire/omen-exchange — prediction market wizard, outcome trading, resolution dashboard
+
+Your frontend preview should look like a rebranded version of the real interface, not a generic AI-generated UI.
 
 ALWAYS include the shipdev-config JSON block so the configuration panel updates.`;
 }
@@ -119,6 +133,7 @@ UI PATTERNS BY PROTOCOL TYPE:
 - Lending: market table (supply APY, borrow APY, TVL), collateral toggle, borrow/repay form
 - Perpetuals: trading view layout, position panel, margin controls, funding rate display
 - Staking: stake/unstake form, rewards display, lock duration selector, APR breakdown
+- Prediction Market: market card grid by category, outcome probability bars, buy YES/NO form, resolution status (open/proposed/disputed/resolved), cross-venue price comparison
 
 CRITICAL: Output ONLY in shipdev-frontend blocks. Use inline styles only. No JSX. No imports.
 Make previews look production-ready with realistic placeholder data.`;

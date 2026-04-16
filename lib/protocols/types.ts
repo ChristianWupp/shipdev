@@ -1,6 +1,6 @@
 /** Core types for the protocol library */
 
-export type ProtocolCategory = "dex" | "lending" | "perpetuals" | "staking" | "stableswap" | "vault";
+export type ProtocolCategory = "dex" | "lending" | "perpetuals" | "staking" | "stableswap" | "vault" | "prediction-market";
 
 export type Chain =
   | "hyperevm-testnet"

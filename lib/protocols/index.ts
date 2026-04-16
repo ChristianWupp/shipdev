@@ -1,12 +1,26 @@
 export type { ProtocolBase, ProtocolCategory, ParameterDef, SecurityProfile, Chain } from "./types";
 export { uniswapV2 } from "./uniswap-v2";
+export { aaveV3 } from "./aave-v3";
+export { compoundV3 } from "./compound-v3";
+export { gmxV2 } from "./gmx-v2";
+export { lidoV2 } from "./lido-v2";
+export { curveV2 } from "./curve-v2";
+export { morphoBlue } from "./morpho-blue";
+export { predexon } from "./predexon";
 
 import { uniswapV2 } from "./uniswap-v2";
+import { aaveV3 } from "./aave-v3";
+import { compoundV3 } from "./compound-v3";
+import { gmxV2 } from "./gmx-v2";
+import { lidoV2 } from "./lido-v2";
+import { curveV2 } from "./curve-v2";
+import { morphoBlue } from "./morpho-blue";
+import { predexon } from "./predexon";
 import type { ProtocolBase, ProtocolCategory, Chain } from "./types";
 import { getNestPitch, getRecommendedVenue } from "../nest";
 
 /** All registered protocol bases */
-export const protocolRegistry: ProtocolBase[] = [uniswapV2];
+export const protocolRegistry: ProtocolBase[] = [uniswapV2, aaveV3, compoundV3, gmxV2, lidoV2, curveV2, morphoBlue, predexon];
 
 /** Look up a protocol by ID */
 export function getProtocol(id: string): ProtocolBase | undefined {
