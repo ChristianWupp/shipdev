@@ -9,9 +9,18 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.68",
+    "@ai-sdk/react": "^3.0.158",
+    "@openrouter/ai-sdk-provider": "^2.5.1",
+    "ai": "^6.0.156",
+    "ethers": "^6.16.0",
     "next": "16.2.3",
+    "next-auth": "^5.0.0-beta.30",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "siwe": "^3.0.0",
+    "solc": "^0.8.34",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
