@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useChat } from "@ai-sdk/react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { ChatPanel } from "./chat-panel";
 import { ConfigPanel } from "./config-panel";
 import { SecurityPanel } from "./security-panel";
@@ -70,6 +71,17 @@ export function BuilderPage() {
       }
     },
   });
+
+  // Auto-send prompt from landing page URL param
+  const searchParams = useSearchParams();
+  const didAutoSend = useRef(false);
+  useEffect(() => {
+    const prompt = searchParams.get("prompt");
+    if (prompt && !didAutoSend.current && messages.length === 0) {
+      didAutoSend.current = true;
+      sendMessage({ text: prompt });
+    }
+  }, [searchParams, messages.length, sendMessage]);
 
   const handleSend = useCallback(() => {
     if (!input.trim()) return;
